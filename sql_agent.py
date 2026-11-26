@@ -4,57 +4,49 @@ import os
 import pathlib
 import sqlite3
 
+from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool
-from langchain.agents import create_agent
 
 
 class SqlAgent:
     
     url = "https://storage.googleapis.com/benchmarks-artifacts/chinook/Chinook.db"
     local_path = pathlib.Path("Chinook.db")
-            
+    
+    def __enter__(self) -> "SqlAgent":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:   # ≈ Dispose()
+        self.con.close()
+
+    
     def __init__(self) -> None:
         
         self.open_api_key = os.environ["OPENAI_API_KEY"]
         self.model = init_chat_model("gpt-5.4-mini-2026-03-17")
         
-        self.con = sqlite3.connect("Chinook.db")
+        self.con = sqlite3.connect(f"file:{self.local_path}?mode=ro", uri=True, check_same_thread=False)
         self.cursor = self.con.cursor()
         self.tools = []
-    
-    def select_names(self):
         
-        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [row[0] for row in self.cursor.fetchall() if not row[0].startswith("sqllite")]
-        
-        print("Dialect: sqlite")
-        print(f"Available tables: {tables}")
-        
-        self.cursor.execute("select * from artist limit 5;")
-        print(f"Sample output: {self.cursor.fetchall()}")
-        self.con.close()
-    
-    # tools 
-    @tool
-    def sql_db_list_tables(self) -> str:
-        """ Input is an empty string, output is a comma-separated list of tables in the database"""
-        
-        try:
+         # tools 
+        @tool
+        def sql_db_list_tables() -> str:
+            """ Input is an empty string, output is a comma-separated list of tables in the database"""
+            
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tables = [row[0] for row in self.cursor.fetchall() if not row[0].startswith("sqlite_")]
             return ", ".join(tables)
-        finally:
-            self.con.close()
-    
-    
-    @tool
-    def sql_db_schema(self, table_names: str) -> str:
-        """Input to this tool is a comma-separated list of tables, output is the schema and sample rows for those tables.
-        Be sure that the tables actually exist by calling sql_db_list_tables first!
-        Example Input: table1, table2, table3"""
+            
         
-        try:
+        
+        @tool
+        def sql_db_schema(table_names: str) -> str:
+            """Input to this tool is a comma-separated list of tables, output is the schema and sample rows for those tables.
+            Be sure that the tables actually exist by calling sql_db_list_tables first!
+            Example Input: table1, table2, table3"""
+            
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             valid_tables = {row[0] for row in self.cursor.fetchall() if not row[0].startswith("sqlite_")}
             results = []
@@ -83,60 +75,60 @@ class SqlAgent:
                     except Exception as e:
                         results.append(f"Error fetching sample rows: {e}")
             return "\n\n".join(results)
-        finally:
-            self.con.close()
-     
-     
-    @tool        
-    def sql_db_query(self, query: str) -> str:
-        """Input to this tool is a detailed and correct SQL query, output is a result from the database.
-        If the query is not correct, an error message will be returned.
-        If an error is returned, rewrite the query, check the query, and try again.
-        If you encounter an issue with Unknown column 'xxxx' in 'field list', use sql_db_schema to query the correct table fields."""
-        
-        try:
-            self.cursor.execute(query)
-            res = self.cursor.fetchall()
-            return str(res)
-        except Exception as e:
-            return f"error: {e}"
-        finally:
-            self.con.close()
-        
-    @tool
-    def sql_db_query_checker(self, query: str) -> str:
-        """Use this tool to double check if your query is correct before executing it.
-        Always use this tool before executing a query with sql_db_query!"""
-        trigger_prompt = f"""{query}
-        Double check the sqlite query above for common mistakes, including:
-        - Using NOT IN with NULL values
-        - Using UNION when UNION ALL should have been used
-        - Using BETWEEN for exclusive ranges
-        - Data type mismatch in predicates
-        - Properly quoting identifiers
-        - Using the correct number of arguments for functions
-        - Casting to the correct data type
-        - Using the proper columns for joins
-
-        If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
-
-        Output the final SQL query only.
-
-        SQL Query: """
-
-        response = self.model.invoke(trigger_prompt)
-        return response.text.strip()
             
-
-    def print_all_tools(self):
-        self.tools = [self.sql_db_list_tables, self.sql_db_schema, 
-                 self.sql_db_query, self.sql_db_query_checker]
-        for t in self.tools:
-            print (f"{t.name}: {t.description}\n")
+        @tool        
+        def sql_db_query(query: str) -> str:
+            """Input to this tool is a detailed and correct SQL query, output is a result from the database.
+            If the query is not correct, an error message will be returned.
+            If an error is returned, rewrite the query, check the query, and try again.
+            If you encounter an issue with Unknown column 'xxxx' in 'field list', use sql_db_schema to query the correct table fields."""
+            
+            try:
+                self.cursor.execute(query)
+                res = self.cursor.fetchall()
+                return str(res)
+            except Exception as e:
+                return f"error: {e}"
+            
+        @tool
+        def sql_db_query_checker(query: str) -> str:
+            """Use this tool to double check if your query is correct before executing it.
+            Always use this tool before executing a query with sql_db_query!"""
+            trigger_prompt = f"""{query}
+            Double check the sqlite query above for common mistakes, including:
+            - Using NOT IN with NULL values
+            - Using UNION when UNION ALL should have been used
+            - Using BETWEEN for exclusive ranges
+            - Data type mismatch in predicates
+            - Properly quoting identifiers
+            - Using the correct number of arguments for functions
+            - Casting to the correct data type
+            - Using the proper columns for joins
     
+            If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
+    
+            Output the final SQL query only.
+    
+            SQL Query: """
+    
+            response = self.model.invoke(trigger_prompt)
+            return response.text.strip()
+        
+        self.tools = [sql_db_list_tables, sql_db_schema, sql_db_query, sql_db_query_checker]
+                    
+    
+    def select_names(self):
+        
+        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [row[0] for row in self.cursor.fetchall() if not row[0].startswith("sqllite")]
+        
+        print("Dialect: sqlite")
+        print(f"Available tables: {tables}")
+        
+        self.cursor.execute("select * from artist limit 5;")
+        print(f"Sample output: {self.cursor.fetchall()}")
     
     def create_sql_agent(self):
-        
         system_prompt = """
         You are an agent designed to interact with a SQL database.
         Given an input question, create a syntactically correct {dialect} query to run,
@@ -162,11 +154,11 @@ class SqlAgent:
             dialect="sqlite",
             top_k=5,
         )
-        
+
         sql_agent = create_agent(
             self.model, self.tools, system_prompt=system_prompt
         )
-        
+
         return sql_agent
     
     def run_sql_agent(self):
@@ -174,14 +166,29 @@ class SqlAgent:
         sql_agent = self.create_sql_agent()
         question = "Which genre on average has the longest tracks?"
 
-        result = sql_agent.invoke(
-            {"messages": [{"role": "user", "content": question}]},
-            verbose=True
-        )
+        # result = sql_agent.invoke(
+        #     {"messages": [{"role": "user", "content": question}]},
+        #     verbose=True
+        # )
 
-        return result
+        # return result
+        
+        stream = sql_agent.stream_events(
+        {"messages": [{"role": "user", "content": question}]},
+        version="v3",
+        )
+        for kind, item in stream.interleave("messages", "tool_calls"):
+            if kind == "messages":
+                for token in item.text:
+                    print(token, end="", flush=True)
+            elif kind == "tool_calls":
+                print(f"\nTool call: {item.tool_name}({item.input})")
+                for delta in item.output_deltas:
+                    print(delta, end="", flush=True)
+                print(f"\nTool result: {item.output}")
+
+        final_state = stream.output
         
 
-
-sql_agent_example = SqlAgent()
-sql_agent_example.run_sql_agent()
+with SqlAgent() as sql_agent_example:
+    sql_agent_example.run_sql_agent()
