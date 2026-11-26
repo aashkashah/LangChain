@@ -15,7 +15,7 @@ class Semantic:
         self._tracing = os.environ["LANGSMITH_TRACING"] = "true"
         self._langchain_api_key = os.environ["LANGSMITH_API_KEY"]
         self._open_api_key = os.environ["OPENAI_API_KEY"]
-        #pinecone_api_key = os.environ["PINECONE_API_KEY"]
+        #self._pinecone_api_key = os.environ["PINECONE_API_KEY"]
         self._vector_store = InMemoryVectorStore(OpenAIEmbeddings())
         self._retriever = self._create_retriever()      
         
@@ -47,7 +47,7 @@ class Semantic:
         # vector store
         self._vector_store = InMemoryVectorStore(embeddings)
         
-        # load and split pdf
+        self._vector_store.add_documents(documents)
 
 
     def load_pdf_pages(self, file_path: str) -> list[Document]:
@@ -62,7 +62,7 @@ class Semantic:
             for i, page in enumerate(reader.pages)
         ]
         
-    def text_splitter_and_indexer(self):
+    def text_splitter_and_indexer(self, docs: list[Document]):
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000, chunk_overlap=200, add_start_index=True
         )
@@ -77,10 +77,11 @@ class Semantic:
     
     def query_vector_store(self) -> tuple[Document, float]:
         results = self._vector_store.similarity_search_with_score(
-            "what are the guardrails of agentic ai"
+            #"what are the guardrails of agentic ai"
+            query="what are cats like"
         )
         
-        print("query result from vecror store")
+        print("query result from vector store")
         return results[0]
         
     def _create_retriever(self):
@@ -93,11 +94,11 @@ class Semantic:
 semantic = Semantic()
 semantic.vector_documents()
     
-file_path: str = "D:\\Interview prep\\Agentic AI Books\\State-of-AI-Agents-2026-Final.pdf"
-docs=semantic.load_pdf_pages(file_path)
-print(f"Called load_pdf_pages, len of documents: {len(docs)}")
+# file_path: str = "D:\\Interview prep\\Agentic AI Books\\State-of-AI-Agents-2026-Final.pdf"
+# docs=semantic.load_pdf_pages(file_path)
+# print(f"Called load_pdf_pages, len of documents: {len(docs)}")
 
-semantic.text_splitter_and_indexer()
+# semantic.text_splitter_and_indexer(docs)
 
 
 doc, score = semantic.query_vector_store()
@@ -105,7 +106,7 @@ print(doc)
 print(f"Score:{score}\n")
 
 
-semantic._retriever.batch(
-    [""]
-)
+# semantic._retriever.batch(
+#     [""]
+# )
 
